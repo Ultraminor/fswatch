@@ -1,6 +1,9 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
 
-int main( void )
+//Entry point for the program
+int main( int argc, char **argv )
 {
 	return 0;
 }

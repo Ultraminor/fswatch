@@ -1,7 +1,7 @@
 all: fswatch
 
 fswatch: main.c
-	gcc -o fswatch main.c
+	gcc -o fswatch main.c -O4 -Wall
 
 install: fswatch
 	cp fswatch /bin

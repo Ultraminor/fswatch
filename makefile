@@ -12,7 +12,8 @@ clean:
 uninstall:
 	rm /bin/fswatch
 
-git:
+git: fswatch
+	touch git
 	@git add main.c README makefile; \
 	read -p "Commit message: " message; \
 	git commit -m "$$message"; \

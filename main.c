@@ -181,6 +181,14 @@ inline void Usage( char *pname )
 	//Total character offset of the option descriptions
 	#define DescOffset	30
 	
+	fprintf( stderr,
+"\
+Usage: %s [OPTIONS] [FILE] ... [GLOBAL OPTIONS]\n\
+All options are of the form '--option <file>' unless specified\n\
+Trailing options are taken to apply to all listed files\n\
+\n\
+", pname );
+	
 	int i, j;
 	for( i = 0; i < ( sizeof( options ) / sizeof( options[ 0 ] ) ); i ++ )
 	{

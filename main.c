@@ -186,7 +186,6 @@ inline void Usage( char *pname )
 Usage: %s [OPTIONS] [FILE] ... [GLOBAL OPTIONS]\n\
 All options are of the form '--option <file>' unless specified\n\
 Trailing options are taken to apply to all listed files\n\
-\n\
 ", pname );
 	
 	int i, j;

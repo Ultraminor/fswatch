@@ -184,7 +184,7 @@ inline void Usage( char *pname )
 	fprintf( stderr,
 "\
 Usage: %s [OPTIONS] [FILE] ... [GLOBAL OPTIONS]\n\
-All options are of the form '--option <file>' unless specified\n\
+All options are of the form '--option <file>'\n\
 Trailing options are taken to apply to all listed files\n\
 ", pname );
 	

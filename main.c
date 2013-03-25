@@ -6,11 +6,9 @@
 #include <string.h>
 #include <stdint.h>
 #include <dirent.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <sys/inotify.h>
-
-//New watch handles are allocated in blocks of WatchStride
-#define WatchStride	256
 
 //Structure for selection of events to be captured
 typedef struct
@@ -33,27 +31,42 @@ typedef struct
 	uint32_t mask;
 	
 	char *path;
+	char *subPath;
 	char *pathTo;
 } Event;
 
 //inotify context
+#define EBufferSize	2048	//Size, in characters, of the event buffer
+#define WatchStride	256	//New watch handles are allocated in blocks of WatchStride
 typedef struct
 {
 	int fd;
 	
 	int nWatches;
-	struct
+	struct WD
 	{
 		int wd;
 		char *path;
 	} *watches;
+	
+	int bi, bufferLength;
+	char buffer[ EBufferSize ];
+	
+	Event event;
 } NotifyContext;
 
 //Initializes a NotifyContext
 void CreateContext( NotifyContext *context );
 
+//Populates context -> event with a new event
+int GetEvent( NotifyContext *context );
+
 //Adds a watch to the given path based on the parameters in mask
 int AddWatch( NotifyContext *context, char *path, NotifyMask *mask );
+
+//Sorts a context so that we can search the watchlist
+int CompareWD( const void *x, const void *y );
+void SortContext( NotifyContext *context );
 
 //Writes strings to stderr until a NULL (casted to char *) is encountered
 //The first n - 1 are taken as prefixes and printed similar to perror
@@ -143,18 +156,45 @@ int main( int argc, char **argv )
 	int i;
 	for( i = 1; i < argc; i ++ )
 	{
+		//Loop, adding options to the mask, until we reach something that looks like a filename
+		
 		if( IsOption( argv[ i ] ) )
 		{
 			ParseOption( argv[ i ], &mask );
 		}
 		else
 		{
+			//Trim trailing slashes
 			int j;
 			for( j = strlen( argv[ i ] ); j -- && argv[ i ][ j ] == '/'; );
 			
-			AddWatch( &context, argv[ i ], &mask );
-			mask = global;
+			//inotify will throw errors if the mask is empty
+			if( ! mask.mask )
+			{
+				ShowError( pname, "warning", "Not watching path", argv[ i ], "No events specified", CNULL );
+			}
+			else
+			{
+				//Add the watch
+				printf( ( AddWatch( &context, argv[ i ], & mask ) ) ? "Path added successfully: %s\n" : "Failed to add path: %s\n", argv[ i ] );
+				
+				//Reset mask
+				mask = global;
+			}
 		}
+	}
+	
+	//Sort the context
+	SortContext( &context );
+	
+	for( ;; )
+	{
+		if( GetEvent( &context ) == -1 )
+			continue;
+		
+		struct tm *etime = localtime( &context.event.timestamp );
+		printf( "[%2d:%2d:%2d] ", etime -> tm_hour, etime -> tm_min, etime -> tm_sec );
+		printf( "Event caught for %s/%s\n", context.event.path, context.event.subPath );
 	}
 	
 	//Success
@@ -229,9 +269,7 @@ Trailing options are taken to apply to all listed files\n\
 }
 
 inline void ParseOption( char *option, NotifyMask *context )
-{
-	//This silently ignores invalid options. Fix?
-	
+{	
 	//Skip first dash
 	option ++;
 	
@@ -256,6 +294,10 @@ inline void ParseOption( char *option, NotifyMask *context )
 			else
 				context -> mask |= options[ i ].mask; //Add the mask
 		}
+		else
+		{
+			ShowError( pname, "unknown long-form option", option - 1 - 1, CNULL );
+		}
 	}
 	else //If it's a short-form option
 	{
@@ -277,6 +319,10 @@ inline void ParseOption( char *option, NotifyMask *context )
 					context -> watchAndFollow = 1;
 				else
 					context -> mask |= options[ j ].mask; //Add the mask
+			}
+			else
+			{
+				ShowError( pname, "unknown short-form option in", option - 1, CNULL );
 			}
 		}
 	}
@@ -330,7 +376,29 @@ int AddWatch( NotifyContext *context, char *path, NotifyMask *mask )
 
 int AddSinglePath( NotifyContext *context, char *path, NotifyMask *mask )
 {
-	printf( "Adding path: %s\n", path );
+	//Check if we need to reallocate
+	if( context -> nWatches % WatchStride == 0 )
+	{
+		void *new = realloc( context -> watches, sizeof( * context -> watches ) * ( context -> nWatches + WatchStride ) );
+		if( ! new )
+		{
+			ShowError( pname, "malloc", strerror( errno ), CNULL );
+			return 0;
+		}
+		
+		context -> watches = new;
+	}
+	
+	context -> watches[ context -> nWatches ].path = path;
+	context -> watches[ context -> nWatches ].wd = inotify_add_watch( context -> fd, path, mask -> mask );
+	if( context -> watches[ context -> nWatches ].wd == -1 )
+	{
+		ShowError( pname, "inotify_add_watch", strerror( errno ), CNULL );
+		return 0;
+	}
+	
+	context -> nWatches ++;
+	
 	return 1;
 }
 
@@ -393,15 +461,11 @@ int AddRecursivePath( NotifyContext *context, char *path, int pathLength, Notify
 	}
 	
 	if( errno ) //Error in readdir
-	{
 		ShowError( pname, "readdir", strerror( errno ), CNULL );
-	}
 		
 	//Close the directory handle
 	if( closedir( dir ) == -1 )
-	{
 		ShowError( pname, "closedir", strerror( errno ), CNULL );
-	}
 	
 	return watchCount;
 }
@@ -417,4 +481,47 @@ void CreateContext( NotifyContext *context )
 	
 	context -> nWatches = 0;
 	context -> watches = NULL;
+	context -> bi = 0;
+	context -> bufferLength = 0;
+}
+
+int CompareWD( const void *x, const void *y )
+{
+	return ( ( struct WD * ) x ) -> wd - ( ( struct WD * ) y ) -> wd;
+}
+
+inline void SortContext( NotifyContext *context )
+{
+	qsort( context -> watches, context -> nWatches, sizeof( *context -> watches ), CompareWD );
+}
+
+int GetEvent( NotifyContext *context )
+{
+	if( context -> bi >= context -> bufferLength )
+	{
+		context -> bi = 0;
+		context -> bufferLength = read( context -> fd, context -> buffer, EBufferSize );
+		if( context -> bufferLength == -1 )
+		{
+			ShowError( pname, read, strerror( errno ), NULL );
+			context -> bufferLength = 0;
+			return -1;
+		}
+	}
+	
+	struct inotify_event *e = ( struct inotify_event * )( &context -> buffer[ context -> bi ] );
+	
+	context -> event.timestamp = time( NULL );
+	context -> event.mask = e -> mask;
+	
+	struct WD search;
+	search.wd = e -> wd;
+	struct WD *index = bsearch( &search, context -> watches, context -> nWatches, sizeof( struct WD ), CompareWD );
+	
+	context -> event.path = ( index ) ? index -> path : "unknown path";
+	context -> event.subPath = e -> len ? e -> name : NULL;
+	
+	context -> bi += sizeof( struct inotify_event ) + e -> len;
+	
+	return 0;
 }

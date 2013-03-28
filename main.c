@@ -10,68 +10,8 @@
 #include <sys/stat.h>
 #include <sys/inotify.h>
 
-//Structure for selection of events to be captured
-typedef struct
-{
-	//Non-inotify params
-	int recur : 1;
-	int watchAndFollow : 1;
-	
-	//inotify mask
-	uint32_t mask;
-} NotifyMask;
-
-//Wrapper for struct inotify_event
-typedef struct
-{
-	//Timestamp for retrieval
-	time_t timestamp;
-	
-	//inotify mask
-	uint32_t mask;
-	
-	char *path;
-	char *subPath;
-	char *pathTo;
-} Event;
-
-//inotify context
-#define EBufferSize	2048	//Size, in characters, of the event buffer
-#define WatchStride	256	//New watch handles are allocated in blocks of WatchStride
-typedef struct
-{
-	int fd;
-	
-	int nWatches;
-	struct WD
-	{
-		int wd;
-		char *path;
-	} *watches;
-	
-	int bi, bufferLength;
-	char buffer[ EBufferSize ];
-	
-	Event event;
-} NotifyContext;
-
-//Initializes a NotifyContext
-void CreateContext( NotifyContext *context );
-
-//Populates context -> event with a new event
-int GetEvent( NotifyContext *context );
-
-//Adds a watch to the given path based on the parameters in mask
-int AddWatch( NotifyContext *context, char *path, NotifyMask *mask );
-
-//Sorts a context so that we can search the watchlist
-int CompareWD( const void *x, const void *y );
-void SortContext( NotifyContext *context );
-
-//Writes strings to stderr until a NULL (casted to char *) is encountered
-//The first n - 1 are taken as prefixes and printed similar to perror
-#define CNULL	( ( char * ) NULL )
-void ShowError( char *string, ... );
+#include "notify.h"
+#include "error.h"
 
 //Some option stuff
 struct
@@ -189,43 +129,56 @@ int main( int argc, char **argv )
 	
 	for( ;; )
 	{
-		if( GetEvent( &context ) == -1 )
+		//Try and grab an event
+		if( ! GetEvent( &context ) )
 			continue;
 		
+		//Print timestamp
 		struct tm *etime = localtime( &context.event.timestamp );
-		printf( "[%2d:%2d:%2d] ", etime -> tm_hour, etime -> tm_min, etime -> tm_sec );
-		printf( "Event caught for %s/%s\n", context.event.path, context.event.subPath );
+		printf( "[%.2d:%.2d:%.2d] ", etime -> tm_hour, etime -> tm_min, etime -> tm_sec );
+		
+		if( context.event.mask & IN_ACCESS )
+			fputs( "File was accessed:", stdout );
+		else if( context.event.mask & IN_MODIFY )
+			fputs( "File was modified:", stdout );
+		else if( context.event.mask & IN_ATTRIB )
+			fputs( "File attributes were modified:", stdout );
+		else if( context.event.mask & IN_CLOSE )
+			printf( "File was closed (was open for %sing):", context.event.mask & IN_CLOSE_WRITE ? "write" : "read" );
+		else if( context.event.mask & IN_OPEN )
+			fputs( "File was opened:", stdout );
+		else if( context.event.mask & ( IN_MOVED_FROM | IN_MOVE_SELF ) )
+			fputs( "File was moved from", stdout );
+		else if( context.event.mask & IN_MOVED_TO )
+			fputs( "File was moved to", stdout );
+		else if( context.event.mask & IN_CREATE )
+			fputs( "File was created:", stdout );
+		else if( context.event.mask & ( IN_DELETE | IN_DELETE_SELF ) )
+			fputs( "File was deleted:", stdout );
+		else if( context.event.mask & IN_UNMOUNT )
+			fputs( "Underlying filesystem was unmounted:", stdout );
+		else if( context.event.mask & IN_IGNORED )
+			fputs( "File was ignored by operating system:", stdout );
+		else if( context.event.mask & IN_Q_OVERFLOW )
+			fputs( "Event queue was overflowed", stdout );
+		
+		if( context.event.path )
+		{
+			putchar( ' ' );
+			fputs( context.event.path, stdout );
+			if( context.event.file )
+			{
+				putchar( '/' );
+				fputs( context.event.file, stdout );
+			}
+		}
+		putchar( '\n' );
 	}
+	
+	//Add cleanup code
 	
 	//Success
 	return EXIT_SUCCESS;
-}
-
-void ShowError( char *string, ... )
-{
-	if( string )
-	{
-		fputs( string, stderr );
-		
-		//Handle varargs
-		va_list ap;
-		va_start( ap, string );
-		
-		//Print any strings in varargs
-		while( ( string = va_arg( ap, char * ) ) )
-		{
-			//The previous string was a prefix
-			fputs( ": ", stderr );
-			
-			//Print the current string
-			fputs( string, stderr );
-		}
-		
-		//Newline
-		fputc( '\n', stderr );
-		
-		va_end( ap );
-	}
 }
 
 inline void Usage( void )
@@ -326,202 +279,4 @@ inline void ParseOption( char *option, NotifyMask *context )
 			}
 		}
 	}
-}
-
-//Watches a single path unrecursively
-int AddSinglePath( NotifyContext *context, char *path, NotifyMask *mask );
-
-//Watches a directory and all subdirectories - assumes that path actually IS a directory, so be careful
-int AddRecursivePath( NotifyContext *context, char *path, int pathLength, NotifyMask *mask );
-
-int AddWatch( NotifyContext *context, char *path, NotifyMask *mask )
-{
-	//Empty strings are taken as root
-	if( ! path || ! *path )
-		path = "/";
-	
-	struct stat st;
-	if( lstat( path, &st ) == -1 )
-	{
-		ShowError( pname, "lstat", strerror( errno ), CNULL );
-		return 0;
-	}
-	
-	//If it's a directory and we need to recur, pass control to AddRecusrive path
-	if( S_ISDIR( st.st_mode ) && mask -> recur )
-	{
-		return AddRecursivePath( context, path, strlen( path ), mask );
-	}
-	else if( S_ISLNK( st.st_mode ) && mask -> watchAndFollow )
-	{
-		//Watch the linked file
-		if( ! AddSinglePath( context, path, mask ) )
-			return 0;
-		
-		//Watch the link
-		mask -> mask |= IN_DONT_FOLLOW;
-		if( ! AddSinglePath( context, path, mask ) )
-		{
-			mask -> mask ^= IN_DONT_FOLLOW;
-			return 1;
-		}
-		mask -> mask ^= IN_DONT_FOLLOW;
-		
-		return 2;
-	}
-		
-	//Just watch the file
-	return AddSinglePath( context, path, mask );
-}
-
-int AddSinglePath( NotifyContext *context, char *path, NotifyMask *mask )
-{
-	//Check if we need to reallocate
-	if( context -> nWatches % WatchStride == 0 )
-	{
-		void *new = realloc( context -> watches, sizeof( * context -> watches ) * ( context -> nWatches + WatchStride ) );
-		if( ! new )
-		{
-			ShowError( pname, "malloc", strerror( errno ), CNULL );
-			return 0;
-		}
-		
-		context -> watches = new;
-	}
-	
-	context -> watches[ context -> nWatches ].path = path;
-	context -> watches[ context -> nWatches ].wd = inotify_add_watch( context -> fd, path, mask -> mask );
-	if( context -> watches[ context -> nWatches ].wd == -1 )
-	{
-		ShowError( pname, "inotify_add_watch", strerror( errno ), CNULL );
-		return 0;
-	}
-	
-	context -> nWatches ++;
-	
-	return 1;
-}
-
-int AddRecursivePath( NotifyContext *context, char *path, int pathLength, NotifyMask *mask )
-{
-	//Watch the directory - watchCount is count of succesfully added paths
-	int watchCount = AddSinglePath( context, path, mask );
-	
-	//Get a dir handle
-	DIR *dir = opendir( path ) ;
-	
-	//Errcheck
-	if( dir == NULL )
-	{
-		ShowError( pname, "opendir", strerror( errno ), CNULL );
-		return 0;
-	}
-		
-	//Reset errno, since readdir has a funny error mechanism
-	errno = 0;
-	struct dirent *d;
-	while( ( d = readdir( dir ) ) )
-	{
-		//Ignore references to self/parent
-		if( strcmp( d -> d_name, "." ) == 0 || strcmp( d -> d_name, ".." ) == 0 )
-			continue;
-		
-		//Length of path for subdir, including '/' but not including null byte
-		int sLength = strlen( d -> d_name );
-		int spLength = pathLength + sLength + 1;
-		
-		//Allocate buffer
-		char *subPath = ( char * ) malloc( sizeof( char ) * ( spLength + 1 ) );
-		if( ! subPath )
-		{
-			ShowError( pname, "malloc", strerror( errno ), CNULL );
-			continue;
-		}
-			
-		//Fill it with the new path
-		memcpy( subPath, path, pathLength );	//Parent path
-		subPath[ pathLength ] = '/';	//Slash
-		memcpy( subPath + pathLength + 1, d -> d_name, sLength ); //Component name
-		subPath[ spLength ] = 0;	//Null byte
-		
-		
-		struct stat st;
-		if( lstat( subPath, &st ) == -1 )
-		{
-			ShowError( pname, "lstat", strerror( errno ), CNULL );
-			continue;
-		}
-		
-		//If we have yet another directory, we need to call recursively
-		if( S_ISDIR( st.st_mode ) )
-			watchCount += AddRecursivePath( context, subPath, spLength, mask );
-		
-		//Again, error handling for readdir
-		errno = 0;
-	}
-	
-	if( errno ) //Error in readdir
-		ShowError( pname, "readdir", strerror( errno ), CNULL );
-		
-	//Close the directory handle
-	if( closedir( dir ) == -1 )
-		ShowError( pname, "closedir", strerror( errno ), CNULL );
-	
-	return watchCount;
-}
-
-void CreateContext( NotifyContext *context )
-{
-	context -> fd = inotify_init( );
-	if( context -> fd == -1 )
-	{
-		ShowError( pname, "inotify_init", strerror( errno ), CNULL );
-		exit( EXIT_FAILURE );
-	}
-	
-	context -> nWatches = 0;
-	context -> watches = NULL;
-	context -> bi = 0;
-	context -> bufferLength = 0;
-}
-
-int CompareWD( const void *x, const void *y )
-{
-	return ( ( struct WD * ) x ) -> wd - ( ( struct WD * ) y ) -> wd;
-}
-
-inline void SortContext( NotifyContext *context )
-{
-	qsort( context -> watches, context -> nWatches, sizeof( *context -> watches ), CompareWD );
-}
-
-int GetEvent( NotifyContext *context )
-{
-	if( context -> bi >= context -> bufferLength )
-	{
-		context -> bi = 0;
-		context -> bufferLength = read( context -> fd, context -> buffer, EBufferSize );
-		if( context -> bufferLength == -1 )
-		{
-			ShowError( pname, read, strerror( errno ), NULL );
-			context -> bufferLength = 0;
-			return -1;
-		}
-	}
-	
-	struct inotify_event *e = ( struct inotify_event * )( &context -> buffer[ context -> bi ] );
-	
-	context -> event.timestamp = time( NULL );
-	context -> event.mask = e -> mask;
-	
-	struct WD search;
-	search.wd = e -> wd;
-	struct WD *index = bsearch( &search, context -> watches, context -> nWatches, sizeof( struct WD ), CompareWD );
-	
-	context -> event.path = ( index ) ? index -> path : "unknown path";
-	context -> event.subPath = e -> len ? e -> name : NULL;
-	
-	context -> bi += sizeof( struct inotify_event ) + e -> len;
-	
-	return 0;
 }

@@ -1,13 +1,19 @@
-all: fswatch
+CC = gcc
+SOURCES = main.c notify.c error.c
+OBJECTS = $(SOURCES:.c=.o)
+OUTPUT = fswatch
+FLAGS = -Wall -O4
 
-fswatch: main.c
-	gcc -o fswatch main.c -O4 -Wall -gstabs
+all: $(OUTPUT)
 
-install: fswatch
-	cp fswatch /bin
+$(OUTPUT): $(OBJECTS)
+	gcc -o $(OUTPUT) $(OBJECTS) $(FLAGS)
+
+%.o: %.c
+	$(CC) -c $< $(FLAGS)
 
 clean:
-	rm fswatch
+	-rm $(OUTPUT) $(OBJECTS)
 
 uninstall:
 	rm /bin/fswatch

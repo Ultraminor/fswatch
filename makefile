@@ -19,7 +19,7 @@ uninstall:
 	rm /bin/fswatch
 
 git:
-	@git add main.c README makefile; \
+	@git add *.c *.h README makefile; \
 	read -p "Commit message: " message; \
 	git commit -m "$$message"; \
 	git push -u origin master;

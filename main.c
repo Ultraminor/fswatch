@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <dirent.h>
 #include <unistd.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <sys/inotify.h>
 
@@ -68,6 +69,12 @@ inline void ParseOption( char *option, NotifyMask *context );
 //Prints usage information and exits
 inline void Usage( void );
 
+volatile int running = 1;
+void CatchQuit( int signal )
+{
+	running = 0;
+}
+
 //Entry point for the program
 char *pname;
 int main( int argc, char **argv )
@@ -127,7 +134,13 @@ int main( int argc, char **argv )
 	//Sort the context
 	SortContext( &context );
 	
-	for( ;; )
+	//Add signal handlers so we can exit cleanly
+	signal( SIGTERM, CatchQuit );
+	signal( SIGINT, CatchQuit );
+	signal( SIGQUIT, CatchQuit );
+	signal( SIGHUP, CatchQuit );
+	
+	while( running )
 	{
 		//Try and grab an event
 		if( ! GetEvent( &context ) )
@@ -137,6 +150,7 @@ int main( int argc, char **argv )
 		struct tm *etime = localtime( &context.event.timestamp );
 		printf( "[%.2d:%.2d:%.2d] ", etime -> tm_hour, etime -> tm_min, etime -> tm_sec );
 		
+		//Print event info
 		if( context.event.mask & IN_ACCESS )
 			fputs( "File was accessed:", stdout );
 		else if( context.event.mask & IN_MODIFY )
@@ -144,7 +158,7 @@ int main( int argc, char **argv )
 		else if( context.event.mask & IN_ATTRIB )
 			fputs( "File attributes were modified:", stdout );
 		else if( context.event.mask & IN_CLOSE )
-			printf( "File was closed (was open for %sing):", context.event.mask & IN_CLOSE_WRITE ? "write" : "read" );
+			printf( "File was closed (was open for %sing):", context.event.mask & IN_CLOSE_WRITE ? "writ" : "read" );
 		else if( context.event.mask & IN_OPEN )
 			fputs( "File was opened:", stdout );
 		else if( context.event.mask & ( IN_MOVED_FROM | IN_MOVE_SELF ) )
@@ -162,6 +176,7 @@ int main( int argc, char **argv )
 		else if( context.event.mask & IN_Q_OVERFLOW )
 			fputs( "Event queue was overflowed", stdout );
 		
+		//Print path if necessary
 		if( context.event.path )
 		{
 			putchar( ' ' );
@@ -176,6 +191,7 @@ int main( int argc, char **argv )
 	}
 	
 	//Add cleanup code
+	puts( "Quitting..." );
 	
 	//Success
 	return EXIT_SUCCESS;

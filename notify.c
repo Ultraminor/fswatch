@@ -205,7 +205,7 @@ Event *GetEvent( NotifyContext *context )
 		context -> bufferLength = read( context -> fd, context -> buffer, ContextBufferLength );
 		if( context -> bufferLength == -1 )
 		{
-			ShowError( pname, read, strerror( errno ), NULL );
+			ShowError( pname, "read", strerror( errno ), NULL );
 			context -> bufferLength = 0;
 			return NULL;
 		}

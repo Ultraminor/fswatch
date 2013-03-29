@@ -100,7 +100,13 @@ int AddSinglePath( NotifyContext *context, char *path, NotifyMask *mask )
 int AddRecursivePath( NotifyContext *context, char *path, int pathLength, NotifyMask *mask )
 {
 	//Watch the directory - watchCount is count of succesfully added paths
-	int watchCount = AddSinglePath( context, path, mask );
+	//int watchCount = AddSinglePath( context, path, mask );
+	//I'm probably the only one who thinks this is funny,
+	//but I was wondering why huge amounts of events were getting thrown every time I recursively watched a path.
+	//I forgot that all the dirent-related crap would be throwing out open/close events with every call.
+	//The call to AddSinglePath has been moved below the recursion to fix this
+	
+	int watchCount = 0;
 	
 	//Get a dir handle
 	DIR *dir = opendir( path ) ;
@@ -135,6 +141,7 @@ int AddRecursivePath( NotifyContext *context, char *path, int pathLength, Notify
 			
 		//Fill it with the new path
 		memcpy( subPath, path, pathLength );	//Parent path
+		
 		subPath[ pathLength ] = '/';	//Slash
 		memcpy( subPath + pathLength + 1, d -> d_name, sLength ); //Component name
 		subPath[ spLength ] = 0;	//Null byte
@@ -162,7 +169,7 @@ int AddRecursivePath( NotifyContext *context, char *path, int pathLength, Notify
 	if( closedir( dir ) == -1 )
 		ShowError( pname, "closedir", strerror( errno ), CNULL );
 	
-	return watchCount;
+	return watchCount + AddSinglePath( context, path, mask );
 }
 
 void CreateContext( NotifyContext *context )

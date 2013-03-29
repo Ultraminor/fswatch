@@ -15,8 +15,11 @@ $(OUTPUT): $(OBJECTS)
 clean:
 	-rm $(OUTPUT) $(OBJECTS)
 
+install: all
+	cp $(OUTPUT) /bin/$(OUTPUT)
+
 uninstall:
-	rm /bin/fswatch
+	rm /bin/$(OUTPUT)
 
 git:
 	@git add *.c *.h README makefile; \

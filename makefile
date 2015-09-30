@@ -16,13 +16,7 @@ clean:
 	-rm $(OUTPUT) $(OBJECTS)
 
 install: all
-	cp $(OUTPUT) /bin/$(OUTPUT)
+	cp $(OUTPUT) /usr/bin/$(OUTPUT)
 
 uninstall:
-	rm /bin/$(OUTPUT)
-
-git:
-	@git add *.c *.h README makefile; \
-	read -p "Commit message: " message; \
-	git commit -m "$$message"; \
-	git push -u origin master;
+	rm /usr/bin/$(OUTPUT)

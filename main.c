@@ -209,7 +209,7 @@ inline void Usage( void )
 	fprintf( stderr,
 "\
 Usage: %s [OPTIONS] [FILE] ... [GLOBAL OPTIONS]\n\
-Otions are of the form '--option <file>' unless specified otherwise\n\
+Options are of the form '--option <file>' unless specified otherwise\n\
 Trailing options are taken to apply to all listed files\n\
 ", pname );
 	

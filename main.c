@@ -149,7 +149,9 @@ int main( int argc, char **argv )
 		//Print timestamp
 		struct tm *etime = localtime( &context.event.timestamp );
 		printf( "[%.2d:%.2d:%.2d] ", etime -> tm_hour, etime -> tm_min, etime -> tm_sec );
-		
+
+		int flag = 1;
+
 		//Print event info
 		if( context.event.mask & IN_ACCESS )
 			fputs( "File was accessed:", stdout );
@@ -175,6 +177,8 @@ int main( int argc, char **argv )
 			fputs( "File was ignored by operating system:", stdout );
 		else if( context.event.mask & IN_Q_OVERFLOW )
 			fputs( "Event queue was overflowed", stdout );
+		else
+			flag = 0;
 		
 		//Print path if necessary
 		if( context.event.path )
@@ -187,7 +191,7 @@ int main( int argc, char **argv )
 				fputs( context.event.file, stdout );
 			}
 		}
-		putchar( '\n' );
+		if(flag) putchar( '\n' );
 	}
 	
 	//Add cleanup code
